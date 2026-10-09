@@ -1,0 +1,8 @@
+# Instalado em /etc/fail2ban/jail.d/bb-sshd.local por 00-hardening.sh.
+[sshd]
+enabled  = true
+backend  = systemd
+maxretry = 4
+findtime = 10m
+bantime  = 1h
+bantime.increment = true

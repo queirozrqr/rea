@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# Tela virtual para login interativo no navegador, acessível SOMENTE por túnel SSH.
+#
+# No servidor:   bb-vnc
+# No seu PC:     ssh -N -L 5900:127.0.0.1:5900 hunter@SERVIDOR
+#                e abra um cliente VNC em 127.0.0.1:5900
+# Em outro shell: bb-chromium <programa> https://alvo --headful
+#
+# Encerre com Ctrl+C (derruba Xvfb, openbox e x11vnc).
+set -euo pipefail
+[[ ${EUID} -ne 0 ]] || { echo "não rode como root" >&2; exit 1; }
+
+DISPLAY_NUM="${BB_VNC_DISPLAY:-99}"
+PASSFILE="${HOME}/.vnc/passwd"
+
+if [[ ! -s "${PASSFILE}" ]]; then
+  install -d -m 700 "${HOME}/.vnc"
+  echo "Defina a senha do VNC (segunda camada além do túnel SSH):"
+  x11vnc -storepasswd "${PASSFILE}"
+  chmod 600 "${PASSFILE}"
+fi
+
+pids=()
+cleanup() { kill "${pids[@]}" 2>/dev/null || true; }
+trap cleanup EXIT INT TERM
+
+Xvfb ":${DISPLAY_NUM}" -screen 0 1600x1000x24 -nolisten tcp &
+pids+=($!)
+sleep 1
+DISPLAY=":${DISPLAY_NUM}" openbox &
+pids+=($!)
+# -localhost: escuta só em 127.0.0.1. -rfbauth: exige senha.
+x11vnc -display ":${DISPLAY_NUM}" -localhost -rfbport 5900 -rfbauth "${PASSFILE}" \
+  -forever -shared -noxdamage -quiet &
+pids+=($!)
+
+echo "[bb-vnc] DISPLAY=:${DISPLAY_NUM}; VNC em 127.0.0.1:5900 (use túnel SSH)."
+wait

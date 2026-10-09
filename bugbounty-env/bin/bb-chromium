@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# Inicia um Chromium descartável por programa, com CDP SOMENTE em loopback.
+#
+# Uso: bb-chromium <programa> [url] [--headful]
+#   --headful  usa a tela virtual do bb-vnc (DISPLAY=:99) para login interativo
+#
+# O navegador roda em primeiro plano; encerre com Ctrl+C. O sandbox do
+# Chromium permanece ATIVO (nunca usamos --no-sandbox).
+set -euo pipefail
+
+usage() { echo "uso: bb-chromium <programa> [url] [--headful]" >&2; exit 2; }
+[[ $# -ge 1 ]] || usage
+PROGRAM="$1"; shift
+URL="about:blank"; HEADFUL=0
+for arg in "$@"; do
+  case "${arg}" in
+    --headful) HEADFUL=1 ;;
+    http://*|https://*) URL="${arg}" ;;
+    *) usage ;;
+  esac
+done
+
+[[ "${PROGRAM}" =~ ^[a-z0-9][a-z0-9_-]{0,63}$ ]] || { echo "nome de programa inválido" >&2; exit 2; }
+[[ ${EUID} -ne 0 ]] || { echo "não rode o navegador como root" >&2; exit 1; }
+
+WORK="${BB_WORK_DIR:-/srv/bb}"
+PORT="${BB_CDP_PORT:-9222}"
+PROFILE="${WORK}/captures/${PROGRAM}/chromium-profile"
+install -d -m 700 "${PROFILE}"
+
+if ss -Htln "sport = :${PORT}" | grep -q .; then
+  echo "porta ${PORT} já em uso; outro navegador ativo?" >&2; exit 1
+fi
+
+# Escopo: se bbrea estiver instalado, a URL inicial precisa estar no escopo.
+if [[ "${URL}" != "about:blank" ]] && command -v bbrea >/dev/null; then
+  bbrea scope-check "${PROGRAM}" "${URL}"
+fi
+
+FLAGS=(
+  "--remote-debugging-port=${PORT}"
+  "--remote-debugging-address=127.0.0.1"
+  "--user-data-dir=${PROFILE}"
+  --no-first-run --no-default-browser-check --disable-sync
+  --disable-extensions --disable-component-update
+  --password-store=basic
+)
+if [[ ${HEADFUL} -eq 1 ]]; then
+  export DISPLAY="${DISPLAY:-:99}"
+else
+  FLAGS+=(--headless=new)
+fi
+
+echo "[bb-chromium] CDP em http://127.0.0.1:${PORT}  perfil: ${PROFILE}"
+exec /usr/bin/chromium "${FLAGS[@]}" "${URL}"

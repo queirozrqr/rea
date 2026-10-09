@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+# Checklist de aceite do ambiente (fase 7). Somente leitura: não instala,
+# não inicia serviços e não acessa alvos.
+set -uo pipefail
+
+ENV_FILE="${BB_ENV_FILE:-/etc/bb/rea-bb.env}"
+# shellcheck disable=SC1090
+[[ -r "${ENV_FILE}" ]] && source "${ENV_FILE}"
+
+pass=0; fail=0; info=0
+ok()   { printf '  \033[32m[OK]\033[0m   %s\n' "$*"; pass=$((pass+1)); }
+bad()  { printf '  \033[31m[FALHA]\033[0m %s\n' "$*"; fail=$((fail+1)); }
+note() { printf '  \033[33m[INFO]\033[0m %s\n' "$*"; info=$((info+1)); }
+
+echo "== Sistema"
+# shellcheck disable=SC1091
+source /etc/os-release
+[[ "${ID}" == "debian" && "${VERSION_ID}" == "13" ]] && ok "Debian 13" || bad "SO: ${PRETTY_NAME}"
+[[ ${EUID} -ne 0 ]] && ok "rodando como usuário comum ($(id -un))" || bad "não rode o dia a dia como root"
+if id -nG | grep -qw sudo; then bad "$(id -un) está no grupo sudo"; else ok "$(id -un) sem sudo"; fi
+
+echo "== Rede (nada além do SSH exposto)"
+exposed="$(ss -Htln | awk '{print $4}' | grep -Ev '^(127\.0\.0\.1|\[::1\]):' | grep -Ev ':22$' || true)"
+[[ -z "${exposed}" ]] && ok "nenhum listener fora de loopback além da 22" || bad "listeners expostos: ${exposed//$'\n'/ }"
+if ss -Htln 'sport = :9222' | grep -q .; then
+  ss -Htln 'sport = :9222' | awk '{print $4}' | grep -qE '^(127\.0\.0\.1|\[::1\]):9222$' \
+    && ok "CDP 9222 somente em loopback" || bad "CDP 9222 exposto fora do loopback!"
+else
+  note "CDP 9222 inativo (normal quando bb-chromium não está rodando)"
+fi
+
+echo "== Runtime"
+[[ "$(node -v 2>/dev/null)" =~ ^v(22\.(19|[2-9][0-9])|24\.(1[1-9]|[2-9][0-9])|2[6-9])\. ]] \
+  && ok "node $(node -v)" || bad "node ausente ou fora de ^22.19 || ^24.11 || >=26"
+command -v rea >/dev/null && ok "rea em $(command -v rea)" || bad "rea não encontrado"
+
+echo "== Ferramentas configuradas em ${ENV_FILE}"
+for v in REA_BROWSER_EXECUTABLE JAVA_HOME REA_JADX_MCP_JAR REA_MITMDUMP_COMMAND GHIDRA_INSTALL_DIR \
+         REA_PWNTOOLS_PYTHON REA_PWNDBG_GDB REA_BINWALK_COMMAND REA_UNBLOB_COMMAND REA_WAKARU_COMMAND; do
+  val="${!v:-}"
+  if [[ -z "${val}" ]]; then note "${v} não configurado (componente não instalado)"
+  elif [[ -e "${val}" ]]; then ok "${v}"
+  else bad "${v} aponta para caminho inexistente: ${val}"
+  fi
+done
+[[ -n "${REA_MITMDUMP_COMMAND:-}" ]] && \
+  { "${REA_MITMDUMP_COMMAND}" --version 2>/dev/null | grep -q "Mitmproxy: 12.2.3" \
+    && ok "mitmproxy 12.2.3" || bad "mitmdump não reporta 12.2.3"; }
+
+echo "== Workspace"
+w="${BB_WORK_DIR:-/srv/bb}"
+[[ -d "${w}" && "$(stat -c %a "${w}")" == "700" ]] && ok "${w} modo 700" || bad "${w} ausente ou com permissão aberta"
+
+echo "== rea doctor"
+if command -v rea >/dev/null; then
+  if rea doctor --json >/dev/null 2>&1; then
+    ok "rea doctor: prontidão OK"
+  else
+    note "rea doctor retornou falhas; veja: rea doctor (provedores opcionais ausentes são informativos)"
+  fi
+fi
+
+echo
+echo "Resumo: ${pass} OK, ${fail} falha(s), ${info} informativo(s)."
+[[ ${fail} -eq 0 ]]

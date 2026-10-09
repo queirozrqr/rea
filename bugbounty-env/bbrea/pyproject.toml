@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bbrea"
+version = "0.1.0"
+description = "Orquestração segura da CLI do REA para bug bounty (escopo primeiro)."
+requires-python = ">=3.11"
+dependencies = [] # somente biblioteca padrão: menor superfície de supply chain
+
+[project.scripts]
+bbrea = "bbrea.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

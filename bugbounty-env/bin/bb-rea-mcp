@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Inicia o servidor MCP do REA via stdio com o ambiente do bug bounty.
+# Não abre porta de rede. Registrado no agente com:
+#   claude mcp add --scope user rea -- /usr/local/bin/bb-rea-mcp
+set -euo pipefail
+ENV_FILE="${BB_ENV_FILE:-/etc/bb/rea-bb.env}"
+[[ -r "${ENV_FILE}" ]] || { echo "bb-rea-mcp: ${ENV_FILE} ilegível" >&2; exit 1; }
+set -a
+# shellcheck disable=SC1090
+source "${ENV_FILE}"
+set +a
+# Versão fixa instalada em /opt/bb-tools: nada é baixado do npm na inicialização.
+exec /usr/local/bin/rea mcp
